@@ -18,7 +18,7 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
     
-    @version 1.4.1
+    @version 1.4.3
 '''
 
 import copy
@@ -39,6 +39,11 @@ from scipy.signal import argrelmax
 
 import matplotlib.pyplot as plt
 import numpy as np
+
+# TODO: remove in release
+# plt.rcParams.update({'font.size': 12})
+# plt.rcParams["figure.figsize"] = (15 / 2.54, 12.34 / 2.54)  # cm
+# plt.rcParams["figure.dpi"] = 200
 
 
 def catch_exceptions(t, val, tb):
@@ -92,16 +97,11 @@ class UvVisData():
                 self.data_start = line_nr
                 break
             except:
-                # TODO: exception
                 pass
 
         self.npoints = self.length - self.data_start
         self.var_stats = lines[:self.data_start]
 
-        # make sure var_stats contains only pairs
-        for pair in self.var_stats:
-            if len(pair) < 2:
-                pair.append('')
         # Default no header information
         self.title = 'Unbekannt'
         self.date = 'Unbekannt'
@@ -145,7 +145,7 @@ class UvVisData():
             # mode
             found = False
             for line in lines:
-                if re.search('YUNITS|Modus', line[0], flags=re.IGNORECASE):
+                if re.search('YUNITS|Modus|Yaxis', line[0], flags=re.IGNORECASE):
                     self.mode = line[-1]
                     found = True
                     break
@@ -158,12 +158,35 @@ class UvVisData():
 
         x = 0
         for data in lines[self.data_start:]:
-            self.wavelength[x] = float(data[0])
             try:
-                self.y[x] = float(data[1])
+                self.wavelength[x] = float(data[0])
+
+            # tail information
             except:
-                self.y[x] = np.nan
+                self.wavelength = self.wavelength[:x]
+                self.y = self.y[:x]
+                self.npoints = self.wavelength.shape[0]
+                self.var_stats.extend(lines[self.data_start + x:])
+                break
+
+            else:
+                try:
+                    self.y[x] = float(data[1])
+                except:
+                    self.y[x] = np.nan
             x += 1
+
+        # make sure var_stats contains only pairs
+        for pair in self.var_stats:
+            if len(pair) == 0:
+                self.var_stats.remove(pair)
+            elif len(pair) == 1:
+                if not pair[0] == '':
+                    pair.append('')
+                else:
+                    self.var_stats.remove(pair)
+            elif len(pair) > 2:
+                del pair[-(len(pair) - 2):]
 
         self.xmin = self.wavelength[0]
         self.xmax = self.wavelength[-1]
@@ -179,6 +202,8 @@ class UvVisData():
             self.unit = {'INTENSITY': ['Intensität I', ' in ', 'a.u.'],  # willkürlichen Einheiten #'$W \cdot m^{-2}$'],
                          'A': ['Extinktion E', '', ''],
                          'E': ['Extinktion E', '', ''],
+                         'ABSORBANCE': ['Extinktion E', '', ''],
+                         'Counts': ['Counts', '', ''],
                          '%T': ['Transmission', ' in ', '\\%']}[self.mode]
         except:
             self.unit = ['', '', self.mode]
@@ -248,8 +273,8 @@ class Reader(QDialog):
                         self.ui.choose_reading.addItem(file_name)
                         label = ''.join(self.data[file_name].unit)
                         self.update_figure()
-                        # TODO: fix
-                    except ZeroDivisionError:
+
+                    except:
                         QMessageBox.critical(None, 'Bein Einlesen der Datei ist ein Fehler aufgetreten',
                                              '''Möglicherweise ist die Datei beschädigt oder besitzt nicht
                                      das richtige Format.''')
@@ -364,6 +389,7 @@ class Reader(QDialog):
             for i in reversed(range(self.ui.var_details_layout.count())):
                 self.ui.var_details_layout.itemAt(i).widget().setParent(None)
 
+            print(reading.var_stats)
             for labeltext, fieldtext in reading.var_stats:
 
                 self.form_list.append((QtWidgets.QLabel(self.ui.var_details_widget),
